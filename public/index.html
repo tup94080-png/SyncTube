@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncTube - Secure Android Hub</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f9; color: #333; }
+        h2 { color: #222; }
+        .section { background: #fff; padding: 15px; margin-bottom: 15px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        video { width: 100%; max-width: 350px; background: #000; border-radius: 5px; margin-top: 10px; display: inline-block; }
+        button { padding: 8px 15px; margin: 5px 5px 5px 0; background: #007BFF; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .btn-danger { background: #dc3545; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-warning { background: #ffc107; color: #000; }
+        .btn-warning:hover { background: #e0a800; }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; max-width: 500px; }
+        .guide-box { background: #eef2f7; border-left: 4px solid #007BFF; padding: 10px 15px; margin-bottom: 15px; font-size: 14px; }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+    <h2>SyncTube Secure App Hub</h2>
+
+    <div class="section">
+        <h3>Sandbox & Tunnel Status</h3>
+        <div class="guide-box">
+            <p><strong>Running securely inside Android Sandbox:</strong></p>
+            <ol>
+                <li>Local HTTPS and secure WebSockets (WSS) are active.</li>
+                <li>Optional public tunnel status displays below if internet connectivity is available.</li>
+            </ol>
+        </div>
+        <p><strong>Active Endpoint:</strong> <a id="publicUrl" href="#" target="_blank">Loading local endpoint...</a></p>
+    </div>
+
+    <div class="section">
+        <h3>Shared Files Repository</h3>
+        <input type="file" id="fileInput" multiple>
+        <button onclick="uploadFiles()">Upload to Folder</button>
+        <h4>Available Folder Files:</h4>
+        <ul id="fileList"></ul>
+    </div>
+
+    <div class="section">
+        <h3>Live Camera & Microphone Stream</h3>
+        <button onclick="startStream()">Start Camera/Mic Stream</button>
+        <button class="btn-danger" onclick="cancelStreamSession()">Cancel & Discard Stream</button>
+        <button class="btn-warning" onclick="sendJoinRequest()">Join Streaming Moment</button>
+        <br>
+        <div>
+            <video id="localVideo" autoplay playsinline muted></video>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Stream Recording & Saving</h3>
+        <button onclick="startRecording()">Start Recording</button>
+        <button onclick="stopAndSaveRecording()">Stop & Save to Folder</button>
+        <button class="btn-danger" onclick="discardRecording()">Discard Recording</button>
+        <p id="recStatus">Status: Idle</p>
+    </div>
+
+    <script>
+        const socket = io();
+        let localStream;
+        let remoteStream;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let peerConnection;
+
+        const servers = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        async function fetchTunnelStatus() {
+            try {
+                const res = await fetch('/api/tunnel-status');
+                const data = await res.json();
+                const urlEl = document.getElementById('publicUrl');
+                if (data.url && data.url !== 'Not generated') {
+                    urlEl.href = data.url;
+                    urlEl.innerText = data.url;
+                } else {
+                    urlEl.innerText = "https://127.0.0.1:3000 (Local Sandbox)";
+                }
+            } catch (e) {
+                console.error('Error fetching status', e);
+                document.getElementById('publicUrl').innerText = "https://127.0.0.1:3000 (Local Sandbox)";
+            }
+        }
+
+        async function uploadFiles() {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) return alert("Select files first.");
+            const formData = new FormData();
+            for (let file of fileInput.files) {
+                formData.append('files', file);
+            }
+
+            await fetch('/upload', { method: 'POST', body: formData });
+            fileInput.value = '';
+            loadFiles();
+        }
+
+        async function loadFiles() {
+            try {
+                const response = await fetch('/files');
+                const files = await response.json();
+                const list = document.getElementById('fileList');
+                list.innerHTML = '';
+                files.forEach(file => {
+                    let li = document.createElement('li');
+                    li.innerHTML = `
+                        <a href="/shared_folder/${encodeURIComponent(file)}" target="_blank">${file}</a>
+                        <button class="btn-danger" onclick="deleteFile('${file}')" style="padding: 4px 8px; font-size: 12px;">Delete</button>
+                    `;
+                    list.appendChild(li);
+                });
+            } catch (e) {
+                console.error('Failed to load files', e);
+            }
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+            const res = await fetch(`/files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+            if (res.ok) {
+                loadFiles();
+            } else {
+                alert("Failed to delete file.");
+            }
+        }
+
+        async function startStream() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+
+                createPeerConnection();
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                alert("Camera and microphone stream active!");
+            } catch (err) {
+                alert("Camera access failed: " + err.message);
+            }
+        }
+
+        function createPeerConnection() {
+            if (peerConnection) return;
+            peerConnection = new RTCPeerConnection(servers);
+            remoteStream = new MediaStream();
+            document.getElementById('remoteVideo').srcObject = remoteStream;
+
+            peerConnection.ontrack = (event) => {
+                event.streams[0].getTracks().forEach(track => {
+                    remoteStream.addTrack(track);
+                });
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('signal', { candidate: event.candidate });
+                }
+            };
+        }
+
+        async function sendJoinRequest() {
+            createPeerConnection();
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('signal', { offer });
+            alert("Join request sent to active session node.");
+        }
+
+        socket.on('signal', async (data) => {
+            createPeerConnection();
+            if (data.offer) {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                socket.emit('signal', { answer });
+            } else if (data.answer) {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } else if (data.candidate) {
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (e) {
+                    console.error('Error adding received ice candidate', e);
+                }
+            }
+        });
+
+        async function cancelStreamSession() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                document.getElementById('localVideo').srcObject = null;
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            document.getElementById('remoteVideo').srcObject = null;
+            alert("Streaming session cancelled.");
+        }
+
+        function startRecording() {
+            if (!localStream) {
+                alert("No active camera/mic stream to record.");
+                return;
+            }
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(localStream);
+            mediaRecorder.ondataavailable = event => {
+                if (event.data.size > 0) recordedChunks.push(event.data);
+            };
+            mediaRecorder.start();
+            document.getElementById('recStatus').innerText = "Status: Recording live moment...";
+        }
+
+        function stopAndSaveRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.onstop = saveRecordingToServer;
+                mediaRecorder.stop();
+                document.getElementById('recStatus').innerText = "Status: Processing and saving to folder...";
+            } else {
+                alert("Recording has not started or is already stopped.");
+            }
+        }
+
+        function discardRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            recordedChunks = [];
+            document.getElementById('recStatus').innerText = "Status: Recording discarded.";
+            alert("Camera recording session discarded without saving.");
+        }
+
+        async function saveRecordingToServer() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const formData = new FormData();
+            formData.append('recording', blob, `live_moment_${Date.now()}.webm`);
+
+            const response = await fetch('/save-recording', { method: 'POST', body: formData });
+            const result = await response.json();
+            alert("Recording successfully saved to designated folder: " + result.filename);
+            document.getElementById('recStatus').innerText = "Status: Idle";
+            loadFiles();
+        }
+
+        socket.on('file-added', () => loadFiles());
+        socket.on('file-deleted', () => loadFiles());
+
+        window.onload = () => {
+            loadFiles();
+            fetchTunnelStatus();
+        };
+    </script>
+</body>
+</html>
