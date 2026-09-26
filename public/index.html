@@ -137,18 +137,28 @@
         }
 
         async function startStream() {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                document.getElementById('localVideo').srcObject = localStream;
-
-                createPeerConnection();
-                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-                alert("Camera and microphone stream active!");
-            } catch (err) {
-                alert("Camera access failed: " + err.message);
-            }
+    try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            alert("getUserMedia is not supported by this browser/WebView environment.");
+            return;
         }
+        
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const videoElement = document.getElementById('localVideo');
+        if (videoElement) {
+            videoElement.srcObject = localStream;
+        }
+
+        createPeerConnection();
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+        alert("Camera and microphone stream active!");
+    } catch (err) {
+        console.error("Camera access error:", err);
+        alert("Camera access failed: " + (err.message || err));
+    }
+        }
+        
 
         function createPeerConnection() {
             if (peerConnection) return;
