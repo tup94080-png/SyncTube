@@ -104,7 +104,7 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-    console.log(`SyncTube secure local HTTPS server running on https://127.0.0.1:${PORT}`);
+server.listen(PORT, 'localhost', () => {
+    console.log(`SyncTube secure local HTTPS server running on https://localhost:${PORT}`);
     setupTunnel();
 });
