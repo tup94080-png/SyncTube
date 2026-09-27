@@ -10,10 +10,17 @@ const localtunnel = require('localtunnel');
 
 const app = express();
 const PORT = 3000;
-const UPLOAD_DIR = path.join(__dirname, 'shared_folder');
+
+// Use a safe, writable directory on Android to prevent read-only APK crashes
+const writableRoot = os.tmpdir ? os.tmpdir() : __dirname;
+const UPLOAD_DIR = path.join(writableRoot, 'sync_tube_shared');
 
 if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    try {
+        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    } catch (e) {
+        console.error("Failed to create UPLOAD_DIR:", e);
+    }
 }
 
 // Helper to find local Wi-Fi IP address dynamically
@@ -129,4 +136,4 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`SyncTube running locally at https://${localIpAddress}:${PORT}`);
     setupTunnel();
 });
-        
+    
