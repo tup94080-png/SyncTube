@@ -106,15 +106,29 @@
 
         async function uploadFiles() {
             const fileInput = document.getElementById('fileInput');
-            if (fileInput.files.length === 0) return alert("Select files first.");
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert("Please select files first.");
+                return;
+            }
+            
             const formData = new FormData();
-            for (let file of fileInput.files) {
-                formData.append('files', file);
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append('files', fileInput.files[i]);
             }
 
-            await fetch('/upload', { method: 'POST', body: formData });
-            fileInput.value = '';
-            loadFiles();
+            try {
+                const response = await fetch('/upload', { method: 'POST', body: formData });
+                if (response.ok) {
+                    fileInput.value = '';
+                    loadFiles();
+                    alert("Files successfully uploaded to folder!");
+                } else {
+                    alert("Upload failed on server.");
+                }
+            } catch (err) {
+                console.error("Upload error:", err);
+                alert("Upload network error: " + err.message);
+            }
         }
 
         async function loadFiles() {
@@ -238,19 +252,40 @@
                 return;
             }
             recordedChunks = [];
-            mediaRecorder = new MediaRecorder(localStream);
+            
+            try {
+                let options = { mimeType: 'video/webm' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'video/mp4';
+                }
+                mediaRecorder = new MediaRecorder(localStream, options);
+            } catch (e) {
+                mediaRecorder = new MediaRecorder(localStream);
+            }
+
             mediaRecorder.ondataavailable = event => {
-                if (event.data.size > 0) recordedChunks.push(event.data);
+                if (event.data && event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
             };
+            
+            mediaRecorder.onstop = async () => {
+                if (recordedChunks.length === 0) {
+                    alert("Recording failed: No media data captured.");
+                    document.getElementById('recStatus').innerText = "Status: Idle";
+                    return;
+                }
+                await saveRecordingToServer();
+            };
+
             mediaRecorder.start();
             document.getElementById('recStatus').innerText = "Status: Recording live moment...";
         }
 
         function stopAndSaveRecording() {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.onstop = saveRecordingToServer;
-                mediaRecorder.stop();
                 document.getElementById('recStatus').innerText = "Status: Processing and saving to folder...";
+                mediaRecorder.stop();
             } else {
                 alert("Recording has not started or is already stopped.");
             }
@@ -258,6 +293,7 @@
 
         function discardRecording() {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.onstop = null; // Prevents triggering save function on stop
                 mediaRecorder.stop();
             }
             recordedChunks = [];
@@ -266,15 +302,23 @@
         }
 
         async function saveRecordingToServer() {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const formData = new FormData();
-            formData.append('recording', blob, `live_moment_${Date.now()}.webm`);
+            try {
+                const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+                const formData = new FormData();
+                formData.append('recording', blob, `live_moment_${Date.now()}.webm`);
 
-            const response = await fetch('/save-recording', { method: 'POST', body: formData });
-            const result = await response.json();
-            alert("Recording successfully saved to designated folder: " + result.filename);
-            document.getElementById('recStatus').innerText = "Status: Idle";
-            loadFiles();
+                const response = await fetch('/save-recording', { method: 'POST', body: formData });
+                if (!response.ok) throw new Error("Server rejected recording.");
+                
+                const result = await response.json();
+                alert("Recording successfully saved to designated folder: " + result.filename);
+                document.getElementById('recStatus').innerText = "Status: Idle";
+                loadFiles();
+            } catch (err) {
+                console.error("Save recording error:", err);
+                alert("Failed to save recording to server.");
+                document.getElementById('recStatus').innerText = "Status: Idle";
+            }
         }
 
         socket.on('file-added', () => loadFiles());
