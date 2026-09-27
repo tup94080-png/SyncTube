@@ -329,5 +329,30 @@
             fetchTunnelStatus();
         };
     </script>
+    <!-- On-Screen Mobile Debugger -->
+<div id="debug-box" style="position:fixed; bottom:0; left:0; width:100%; max-height:150px; background:rgba(0,0,0,0.85); color:#00ffcc; font-size:11px; font-family:monospace; padding:8px; overflow-y:scroll; z-index:99999; display:none;">
+    <b>Dev Console:</b> <button onclick="document.getElementById('debug-box').style.display='none'" style="float:right;background:red;color:white;border:none;">Close</button><br/>
+    <div id="debug-logs"></div>
+</div>
+<button onclick="document.getElementById('debug-box').style.display='block'" style="position:fixed; bottom:5px; right:5px; z-index:99998; background:#333; color:white; border:1px solid #00ffcc; padding:4px 8px; font-size:10px; border-radius:4px;">🐞 Logs</button>
+
+<script>
+    (function () {
+        const logContainer = document.getElementById('debug-logs');
+        function appendLog(type, args) {
+            const msg = Array.from(args).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+            logContainer.innerHTML += `<div><span style="color:${type==='error'?'#ff4444':'#ffff44'}">[${type}]</span> ${msg}</div>`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        const oldLog = console.log;
+        const oldErr = console.error;
+        console.log = function() { appendLog('log', arguments); oldLog.apply(console, arguments); };
+        console.error = function() { appendLog('error', arguments); oldErr.apply(console, arguments); };
+        window.onerror = function(msg, url, line) {
+            console.error(`UI Error: ${msg} at line ${line}`);
+        };
+    })();
+</script>
+    
 </body>
 </html>
