@@ -42,7 +42,7 @@ function getLocalIp() {
 
 const localIpAddress = getLocalIp();
 
-// Safely generate SSL certificate
+// Safely generate SSL certificate for secure WebRTC contexts
 let sslOptions;
 try {
     const attrs = [{ name: 'commonName', value: localIpAddress }];
@@ -53,11 +53,9 @@ try {
     };
 } catch (e) {
     console.error("SSL Generation failed, falling back:", e);
-    // Fallback dummy or basic keys if selfsigned fails
     sslOptions = null; 
 }
 
-// Create server (fallback to HTTP if SSL fails, though HTTPS is preferred)
 let server;
 if (sslOptions) {
     server = https.createServer(sslOptions, app);
@@ -148,9 +146,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// Bind safely to 0.0.0.0
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`SyncTube running locally at port ${PORT}`);
-    // Delay tunnel setup slightly so app boots smoothly first
     setTimeout(setupTunnel, 2000);
 });
+                       
