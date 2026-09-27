@@ -4,12 +4,35 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const selfsigned = require('selfsigned');
 const localtunnel = require('localtunnel');
 
 const app = express();
+const PORT = 3000;
+const UPLOAD_DIR = path.join(__dirname, 'shared_folder');
 
-const attrs = [{ name: 'commonName', value: '127.0.0.1' }];
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+// Helper to find local Wi-Fi IP address dynamically
+function getLocalIp() {
+    const interfaces = os.networkInterfaces();
+    for (const name of interfaces) {
+        for (const net of interfaces[name]) {
+            if (net.family === 'IPv4' && !net.internal) {
+                return net.address;
+            }
+        }
+    }
+    return '127.0.0.1';
+}
+
+const localIpAddress = getLocalIp();
+
+// Generate SSL certificate tied to the local network IP so browsers trust local HTTPS connections
+const attrs = [{ name: 'commonName', value: localIpAddress }];
 const pems = selfsigned.generate(attrs, { days: 365, keySize: 2048 });
 
 const sslOptions = {
@@ -18,13 +41,6 @@ const sslOptions = {
 };
 const server = https.createServer(sslOptions, app);
 const io = new Server(server);
-
-const PORT = 3000;
-const UPLOAD_DIR = path.join(__dirname, 'shared_folder');
-
-if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOAD_DIR),
@@ -44,10 +60,11 @@ async function setupTunnel() {
         activeTunnelUrl = tunnel.url;
         console.log(`Public Tunnel Active: ${activeTunnelUrl}`);
         tunnel.on('close', () => {
-            console.log('Tunnel closed');
+            activeTunnelUrl = 'Offline / Local Sandbox Mode';
         });
     } catch (err) {
-        console.error('Tunnel offline or unavailable (normal for offline mobile sandbox):', err.message);
+        console.error('Tunnel offline or unavailable:', err.message);
+        activeTunnelUrl = 'Offline / Local Sandbox Mode';
     }
 }
 
@@ -79,7 +96,10 @@ app.post('/upload', upload.array('files'), (req, res) => {
 });
 
 app.get('/api/tunnel-status', (req, res) => {
-    res.json({ url: activeTunnelUrl });
+    res.json({ 
+        url: activeTunnelUrl,
+        localUrl: `https://${localIpAddress}:${PORT}`
+    });
 });
 
 app.post('/save-recording', upload.single('recording'), (req, res) => {
@@ -104,7 +124,9 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(PORT, 'localhost', () => {
-    console.log(`SyncTube secure local HTTPS server running on https://localhost:${PORT}`);
+// Bind to '0.0.0.0' so local network devices can connect to your phone's IP address
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`SyncTube running locally at https://${localIpAddress}:${PORT}`);
     setupTunnel();
 });
+        
