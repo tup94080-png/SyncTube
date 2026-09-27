@@ -1,4 +1,4 @@
-package com.synctube.app;
+com.synctube.app;
 
 import android.os.Bundle;
 import android.webkit.PermissionRequest;
