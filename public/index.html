@@ -181,7 +181,6 @@
                     audio: true 
                 });
                 
-                // Route initiator local stream to the top window
                 const initiatorVideo = document.getElementById('initiatorVideo');
                 if (initiatorVideo) {
                     initiatorVideo.srcObject = localStream;
@@ -203,7 +202,6 @@
             peerConnection = new RTCPeerConnection(servers);
             remoteStream = new MediaStream();
             
-            // Route incoming peer streams to the bottom receiver window
             document.getElementById('receiverVideo').srcObject = remoteStream;
 
             peerConnection.ontrack = (event) => {
@@ -222,7 +220,6 @@
         async function sendJoinRequest() {
             createPeerConnection();
             
-            // If they haven't started local camera yet, prompt for access to join stream
             if (!localStream) {
                 try {
                     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
