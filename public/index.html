@@ -31,10 +31,12 @@
             <p><strong>Running securely inside Android Sandbox:</strong></p>
             <ol>
                 <li>Local HTTPS and secure WebSockets (WSS) are active.</li>
-                <li>Optional public tunnel status displays below if internet connectivity is available.</li>
+                <li>Local network and public tunnel endpoints display below.</li>
             </ol>
         </div>
-        <p><strong>Active Endpoint:</strong> <a id="publicUrl" href="#" target="_blank">Loading local endpoint...</a></p>
+        <p><strong>Active Endpoints:</strong></p>
+        <p>Local URL: <a id="localUrl" href="#" target="_blank">Loading local IP...</a></p>
+        <p>Public URL: <a id="publicUrl" href="#" target="_blank">Loading tunnel...</a></p>
     </div>
 
     <div class="section">
@@ -81,16 +83,24 @@
             try {
                 const res = await fetch('/api/tunnel-status');
                 const data = await res.json();
+                
+                const localEl = document.getElementById('localUrl');
+                if (data.localUrl) {
+                    localEl.href = data.localUrl;
+                    localEl.innerText = data.localUrl;
+                }
+
                 const urlEl = document.getElementById('publicUrl');
-                if (data.url && data.url !== 'Not generated') {
+                if (data.url && data.url !== 'Offline / Local Sandbox Mode') {
                     urlEl.href = data.url;
                     urlEl.innerText = data.url;
                 } else {
-                    urlEl.innerText = "https://127.0.0.1:3000 (Local Sandbox)";
+                    urlEl.innerText = "Offline / Local Sandbox Mode";
                 }
             } catch (e) {
                 console.error('Error fetching status', e);
-                document.getElementById('publicUrl').innerText = "https://127.0.0.1:3000 (Local Sandbox)";
+                document.getElementById('localUrl').innerText = "Unavailable";
+                document.getElementById('publicUrl').innerText = "Offline Mode Active";
             }
         }
 
@@ -135,35 +145,35 @@
                 alert("Failed to delete file.");
             }
         }
+
         async function startStream() {
-    try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            alert("getUserMedia is not supported by this environment.");
-            return;
-        }
-        
-        // Request basic constraints to avoid hardware constraint rejections on mobile WebViews
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { width: { ideal: 640 }, height: { ideal: 480 } }, 
-            audio: true 
-        });
-        
-        const videoElement = document.getElementById('localVideo');
-        if (videoElement) {
-            videoElement.srcObject = localStream;
-            // Explicitly call play to force rendering on mobile webviews
-            await videoElement.play().catch(e => console.log("Auto-play prevented:", e));
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert("getUserMedia is not supported by this environment.");
+                    return;
+                }
+                
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: { ideal: 640 }, height: { ideal: 480 } }, 
+                    audio: true 
+                });
+                
+                const videoElement = document.getElementById('localVideo');
+                if (videoElement) {
+                    videoElement.srcObject = localStream;
+                    await videoElement.play().catch(e => console.log("Auto-play prevented:", e));
+                }
+
+                createPeerConnection();
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                console.log("Stream successfully initialized and attached.");
+            } catch (err) {
+                console.error("Camera access error:", err);
+                alert("Camera access failed: " + (err.message || err));
+            }
         }
 
-        createPeerConnection();
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-        console.log("Stream successfully initialized and attached.");
-    } catch (err) {
-        console.error("Camera access error:", err);
-        alert("Camera access failed: " + (err.message || err));
-    }
-        }
         function createPeerConnection() {
             if (peerConnection) return;
             peerConnection = new RTCPeerConnection(servers);
