@@ -135,31 +135,35 @@
                 alert("Failed to delete file.");
             }
         }
-
         async function startStream() {
     try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            alert("getUserMedia is not supported by this browser/WebView environment.");
+            alert("getUserMedia is not supported by this environment.");
             return;
         }
         
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // Request basic constraints to avoid hardware constraint rejections on mobile WebViews
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: { ideal: 640 }, height: { ideal: 480 } }, 
+            audio: true 
+        });
+        
         const videoElement = document.getElementById('localVideo');
         if (videoElement) {
             videoElement.srcObject = localStream;
+            // Explicitly call play to force rendering on mobile webviews
+            await videoElement.play().catch(e => console.log("Auto-play prevented:", e));
         }
 
         createPeerConnection();
         localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-        alert("Camera and microphone stream active!");
+        console.log("Stream successfully initialized and attached.");
     } catch (err) {
         console.error("Camera access error:", err);
         alert("Camera access failed: " + (err.message || err));
     }
         }
-        
-
         function createPeerConnection() {
             if (peerConnection) return;
             peerConnection = new RTCPeerConnection(servers);
