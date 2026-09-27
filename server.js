@@ -11,8 +11,8 @@ const localtunnel = require('localtunnel');
 const app = express();
 const PORT = 3000;
 
-// Use a safe, writable directory on Android to prevent read-only APK crashes
-const writableRoot = os.tmpdir ? os.tmpdir() : __dirname;
+// Safe writable directory for Android
+const writableRoot = (os.tmpdir && typeof os.tmpdir === 'function') ? os.tmpdir() : __dirname;
 const UPLOAD_DIR = path.join(writableRoot, 'sync_tube_shared');
 
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -25,28 +25,47 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 
 // Helper to find local Wi-Fi IP address dynamically
 function getLocalIp() {
-    const interfaces = os.networkInterfaces();
-    for (const name of interfaces) {
-        for (const net of interfaces[name]) {
-            if (net.family === 'IPv4' && !net.internal) {
-                return net.address;
+    try {
+        const interfaces = os.networkInterfaces();
+        for (const name of interfaces) {
+            for (const net of interfaces[name]) {
+                if (net.family === 'IPv4' && !net.internal) {
+                    return net.address;
+                }
             }
         }
+    } catch (e) {
+        console.error("Error getting local IP:", e);
     }
     return '127.0.0.1';
 }
 
 const localIpAddress = getLocalIp();
 
-// Generate SSL certificate tied to the local network IP so browsers trust local HTTPS connections
-const attrs = [{ name: 'commonName', value: localIpAddress }];
-const pems = selfsigned.generate(attrs, { days: 365, keySize: 2048 });
+// Safely generate SSL certificate
+let sslOptions;
+try {
+    const attrs = [{ name: 'commonName', value: localIpAddress }];
+    const pems = selfsigned.generate(attrs, { days: 365, keySize: 2048 });
+    sslOptions = {
+        key: pems.private,
+        cert: pems.cert
+    };
+} catch (e) {
+    console.error("SSL Generation failed, falling back:", e);
+    // Fallback dummy or basic keys if selfsigned fails
+    sslOptions = null; 
+}
 
-const sslOptions = {
-    key: pems.private,
-    cert: pems.cert
-};
-const server = https.createServer(sslOptions, app);
+// Create server (fallback to HTTP if SSL fails, though HTTPS is preferred)
+let server;
+if (sslOptions) {
+    server = https.createServer(sslOptions, app);
+} else {
+    const http = require('http');
+    server = http.createServer(app);
+}
+
 const io = new Server(server);
 
 const storage = multer.diskStorage({
@@ -78,22 +97,26 @@ async function setupTunnel() {
 app.get('/files', (req, res) => {
     fs.readdir(UPLOAD_DIR, (err, files) => {
         if (err) return res.status(500).json({ error: "Could not retrieve folder repository" });
-        res.json(files);
+        res.json(files || []);
     });
 });
 
 app.delete('/files/:filename', (req, res) => {
-    const filename = decodeURIComponent(req.params.filename);
-    const filePath = path.join(UPLOAD_DIR, filename);
+    try {
+        const filename = decodeURIComponent(req.params.filename);
+        const filePath = path.join(UPLOAD_DIR, filename);
 
-    if (fs.existsSync(filePath)) {
-        fs.unlink(filePath, (err) => {
-            if (err) return res.status(500).json({ error: "Failed to delete file" });
-            io.emit('file-deleted', filename);
-            res.json({ success: true, message: `Deleted ${filename}` });
-        });
-    } else {
-        res.status(404).json({ error: "File not found" });
+        if (fs.existsSync(filePath)) {
+            fs.unlink(filePath, (err) => {
+                if (err) return res.status(500).json({ error: "Failed to delete file" });
+                io.emit('file-deleted', filename);
+                res.json({ success: true, message: `Deleted ${filename}` });
+            });
+        } else {
+            res.status(404).json({ error: "File not found" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: "Server error during deletion" });
     }
 });
 
@@ -116,8 +139,6 @@ app.post('/save-recording', upload.single('recording'), (req, res) => {
 });
 
 io.on('connection', (socket) => {
-    console.log(`Secure client connected: ${socket.id}`);
-
     socket.on('video-action', (data) => {
         socket.broadcast.emit('update-video-state', data);
     });
@@ -125,15 +146,11 @@ io.on('connection', (socket) => {
     socket.on('signal', (data) => {
         socket.broadcast.emit('signal', data);
     });
-
-    socket.on('disconnect', () => {
-        console.log(`Client disconnected: ${socket.id}`);
-    });
 });
 
-// Bind to '0.0.0.0' so local network devices can connect to your phone's IP address
+// Bind safely to 0.0.0.0
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`SyncTube running locally at https://${localIpAddress}:${PORT}`);
-    setupTunnel();
+    console.log(`SyncTube running locally at port ${PORT}`);
+    // Delay tunnel setup slightly so app boots smoothly first
+    setTimeout(setupTunnel, 2000);
 });
-    
