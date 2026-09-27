@@ -11,7 +11,6 @@ const localtunnel = require('localtunnel');
 const app = express();
 const PORT = 3000;
 
-// Safe writable directory for Android
 const writableRoot = (os.tmpdir && typeof os.tmpdir === 'function') ? os.tmpdir() : __dirname;
 const UPLOAD_DIR = path.join(writableRoot, 'sync_tube_shared');
 
@@ -23,11 +22,10 @@ if (!fs.existsSync(UPLOAD_DIR)) {
     }
 }
 
-// Helper to find local Wi-Fi IP address dynamically
 function getLocalIp() {
     try {
         const interfaces = os.networkInterfaces();
-        for (const name of interfaces) {
+        for (const name of Object.keys(interfaces)) {
             for (const net of interfaces[name]) {
                 if (net.family === 'IPv4' && !net.internal) {
                     return net.address;
@@ -42,7 +40,6 @@ function getLocalIp() {
 
 const localIpAddress = getLocalIp();
 
-// Safely generate SSL certificate for secure WebRTC contexts
 let sslOptions;
 try {
     const attrs = [{ name: 'commonName', value: localIpAddress }];
@@ -150,4 +147,3 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`SyncTube running locally at port ${PORT}`);
     setTimeout(setupTunnel, 2000);
 });
-                       
